@@ -82,7 +82,7 @@ class BinaryTreeSet extends Actor {
     * all non-removed elements into.
     */
   def garbageCollecting(newRoot: ActorRef): Receive = {
-    case GC => None //already garbage collecting, so ignore other requests
+    case GC => () //already garbage collecting, so ignore other requests
     
     case op: Operation => {
       //add it to the pending queue
@@ -91,7 +91,8 @@ class BinaryTreeSet extends Actor {
     
     case CopyFinished => {
       //process the queue
-      root = newRoot
+      root ! PoisonPill
+      
       while(!pendingQueue.isEmpty) {
         val (message, modifiedQueue) = pendingQueue.dequeue
         pendingQueue = modifiedQueue
@@ -131,11 +132,13 @@ class BinaryTreeNode(val elem: Int, initiallyRemoved: Boolean) extends Actor {
   /** Handles `Operation` messages and `CopyTo` requests. */
   val normal: Receive = { 
     case Insert(requester, id, e) => {
-      if (elem == e) {
+      if (this.elem == e) {
+        println("EEEEQQQQUUUAAAAALLLLLLL -> " + elem + " - " + e)
         removed = false
         requester ! OperationFinished(id)
       } else {
-        if (this.elem < e) {
+        if (e > this.elem) {
+          println("insertion is larger than this, go right -> " + e + " this: " + elem)
           if (subtrees.contains(Right)) {
         	 subtrees(Right) ! Insert(requester, id, e)
           } else {
@@ -143,6 +146,7 @@ class BinaryTreeNode(val elem: Int, initiallyRemoved: Boolean) extends Actor {
              requester ! OperationFinished(id)
           }
         } else {
+           println("insertion is smaller than this, go left -> " + e + " this: " + elem)
           if (subtrees.contains(Left)) {
         	 subtrees(Left) ! Insert(requester, id, e)
           } else {
@@ -185,6 +189,16 @@ class BinaryTreeNode(val elem: Int, initiallyRemoved: Boolean) extends Actor {
     }
       
     case CopyTo(newRoot) => {
+    	val childrenIter = subtrees.values
+    	
+    	if (!this.removed) {
+    	  newRoot ! Insert(self, 0, elem)
+    	  context.become(copying(childrenIter.toSet, false))
+    	} else if (childrenIter.isEmpty) {
+    	  context.parent ! CopyFinished
+    	} else {
+    	  context.become(copying(childrenIter.toSet, true))
+    	}
     }
 
   }
@@ -193,6 +207,19 @@ class BinaryTreeNode(val elem: Int, initiallyRemoved: Boolean) extends Actor {
   /** `expected` is the set of ActorRefs whose replies we are waiting for,
     * `insertConfirmed` tracks whether the copy of this node to the new tree has been confirmed.
     */
-  def copying(expected: Set[ActorRef], insertConfirmed: Boolean): Receive = ???
+  def copying(expected: Set[ActorRef], insertConfirmed: Boolean): Receive = {
+    case OperationFinished(0) => checkFinished(expected, insertConfirmed)
+    case CopyFinished => checkFinished(expected - sender, insertConfirmed)
+  }
+  
+  def checkFinished(expected: Set[ActorRef], insertConfirmed: Boolean): Unit = {
+    if(expected.isEmpty && insertConfirmed) {
+      context.unbecome()
+      context.parent ! CopyFinished
+      subtrees.values.foreach { _ ! PoisonPill }
+    } else {
+      context.become(copying(expected, insertConfirmed))
+    }
+  }
 
 }
