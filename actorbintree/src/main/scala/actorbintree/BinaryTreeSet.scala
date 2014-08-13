@@ -82,7 +82,7 @@ class BinaryTreeSet extends Actor {
     * all non-removed elements into.
     */
   def garbageCollecting(newRoot: ActorRef): Receive = {
-    case GC => () //already garbage collecting, so ignore other requests
+    case GC => None //already garbage collecting, so ignore other requests
     
     case op: Operation => {
       //add it to the pending queue
@@ -92,7 +92,7 @@ class BinaryTreeSet extends Actor {
     case CopyFinished => {
       //process the queue
       root ! PoisonPill
-      
+      root = newRoot
       while(!pendingQueue.isEmpty) {
         val (message, modifiedQueue) = pendingQueue.dequeue
         pendingQueue = modifiedQueue
@@ -133,13 +133,15 @@ class BinaryTreeNode(val elem: Int, initiallyRemoved: Boolean) extends Actor {
   val normal: Receive = { 
     case Insert(requester, id, e) => {
       if (this.elem == e) {
-        println("EEEEQQQQUUUAAAAALLLLLLL -> " + elem + " - " + e)
+        println("equal -> " + elem + " - " + e)
         removed = false
         requester ! OperationFinished(id)
       } else {
         if (e > this.elem) {
           println("insertion is larger than this, go right -> " + e + " this: " + elem)
           if (subtrees.contains(Right)) {
+            val what  = subtrees(Right)
+            println("yooooo " + what)
         	 subtrees(Right) ! Insert(requester, id, e)
           } else {
              subtrees = subtrees.updated(Right, context.actorOf(BinaryTreeNode.props(e, initiallyRemoved = false)))
@@ -208,8 +210,9 @@ class BinaryTreeNode(val elem: Int, initiallyRemoved: Boolean) extends Actor {
     * `insertConfirmed` tracks whether the copy of this node to the new tree has been confirmed.
     */
   def copying(expected: Set[ActorRef], insertConfirmed: Boolean): Receive = {
-    case OperationFinished(0) => checkFinished(expected, insertConfirmed)
-    case CopyFinished => checkFinished(expected - sender, insertConfirmed)
+    
+    case OperationFinished(0) => println("expecting:  " + expected.size); checkFinished(expected, insertConfirmed)
+    case CopyFinished => println("copyexpecting:  " + expected.size); checkFinished(expected - sender, insertConfirmed)
   }
   
   def checkFinished(expected: Set[ActorRef], insertConfirmed: Boolean): Unit = {
