@@ -105,6 +105,7 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
             }
             case None => {
               kv = kv - op.key
+              persistAcks = persistAcks + (op.seq -> sender)
               context.system.scheduler.schedule(0 millis, 100 millis, persistence, Persist(op.key, op.valueOption, op.seq))
               expectedSeq = expectedSeq + 1
             }
